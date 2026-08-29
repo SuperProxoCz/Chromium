@@ -1,0 +1,57 @@
+name: Build Desktop Android Chromium with H264
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space™
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+
+      - name: Install Tools™
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
+
+      - name: Chromium Source™
+        run: |
+          fetch --no-history --no-hooks android
+          cd src
+          ./build/install-build-deps.sh --android
+          gclient runhooks
+
+      - name: Configure GN Args (Aka The Part That Adds The Imfamous h264 Support To The Android Desktop Chromium Fork I Am Making To Add The h264 Support.......™
+        run: |
+          cd src
+          mkdir -p out/Default
+          cat << 'EOF' > out/Default/args.gn
+          target_os = "android"
+          target_cpu = "arm64"
+          is_debug = false
+          is_official_build = true
+          symbol_level = 0
+          
+          # Enable Desktop Layout + Extensions
+          enable_desktop_android_extensions = true
+          
+          # Enable H.264 / MP4 / AAC
+          proprietary_codecs = true
+          ffmpeg_branding = "Chrome"
+          EOF
+          gn gen out/Default
+
+      - name: Compile APK
+        run: |
+          cd src
+          autoninja -C out/Default chrome_public_apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChromePublic-AndroidDesktop-H264
+          path: src/out/Default/apks/ChromePublic.apk
+          
