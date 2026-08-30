@@ -24,24 +24,18 @@ jobs:
           ./build/install-build-deps.sh --android
           gclient runhooks
 
-      - name: Configure GN Args (Aka The Part That Adds The Imfamous h264 Support To The Android Desktop Chromium Fork I Am Making To Add The h264 Support.......™
+      - name: Configure GN Args
         run: |
           cd src
           mkdir -p out/Default
-          cat << 'EOF' > out/Default/args.gn
-          target_os = "android"
-          target_cpu = "arm64"
-          is_debug = false
-          is_official_build = true
-          symbol_level = 0
-          
-          # Enable Desktop Layout + Extensions
-          enable_desktop_android_extensions = true
-          
-          # Enable H.264 / MP4 / AAC
-          proprietary_codecs = true
-          ffmpeg_branding = "Chrome"
-          EOF
+          echo 'target_os = "android"' > out/Default/args.gn
+          echo 'target_cpu = "arm64"' >> out/Default/args.gn
+          echo 'is_debug = false' >> out/Default/args.gn
+          echo 'is_official_build = true' >> out/Default/args.gn
+          echo 'symbol_level = 0' >> out/Default/args.gn
+          echo 'is_desktop_android = true' >> out/Default/args.gn
+          echo 'proprietary_codecs = true' >> out/Default/args.gn
+          echo 'ffmpeg_branding = "Chrome"' >> out/Default/args.gn
           gn gen out/Default
 
       - name: Compile APK
