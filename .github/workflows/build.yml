@@ -33,9 +33,17 @@ jobs:
           echo 'is_debug = false' >> out/Default/args.gn
           echo 'is_official_build = true' >> out/Default/args.gn
           echo 'symbol_level = 0' >> out/Default/args.gn
+          
+          # Enable Desktop Layout + Extensions
           echo 'is_desktop_android = true' >> out/Default/args.gn
+          
+          # Enable H.264 Codecs Etc
           echo 'proprietary_codecs = true' >> out/Default/args.gn
           echo 'ffmpeg_branding = "Chrome"' >> out/Default/args.gn
+          
+          # fix missing profile errors
+          echo 'v8_enable_builtins_optimization = false' >> out/Default/args.gn
+          
           gn gen out/Default
 
       - name: Compile APK
