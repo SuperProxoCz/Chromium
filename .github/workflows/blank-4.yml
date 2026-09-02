@@ -1,0 +1,153 @@
+name: Build Desktop Android Chromium with H264
+
+on:
+  workflow_dispatch:
+    inputs:
+      fetch_sources:
+        description: 'Fetch Chromium sources with depot_tools (may be long)'
+        required: false
+        default: 'false'
+      install_deps:
+        description: 'Run install-build-deps.sh (heavy)'
+        required: false
+        default: 'false'
+      compile:
+        description: 'Run autoninja build (very long). Set true to compile.'
+        required: false
+        default: 'false'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free Disk Space™
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          sudo apt-get clean || true
+
+      - name: Cache depot_tools
+        id: cache-depot
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/depot_tools
+          key: depot-tools-${{ runner.os }}-v1
+
+      - name: Ensure depot_tools on PATH
+        run: |
+          if [ ! -d "$GITHUB_WORKSPACE/depot_tools" ]; then
+            git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git $GITHUB_WORKSPACE/depot_tools
+          fi
+          echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
+
+      - name: Cache Chromium sources
+        id: cache-sources
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/src
+          key: chromium-sources-${{ runner.os }}-v1
+          restore-keys: |
+            chromium-sources-${{ runner.os }}-
+
+      - name: Chromium Source™ (fetch)
+        if: ${{ github.event.inputs.fetch_sources == 'true' }}
+        run: |
+          if [ ! -d "$GITHUB_WORKSPACE/src" ]; then
+            fetch --no-history --no-hooks android
+          fi
+          cd src
+          gclient runhooks
+
+      - name: Install build deps (optional)
+        if: ${{ github.event.inputs.install_deps == 'true' && github.event.inputs.fetch_sources == 'true' }}
+        run: |
+          cd src
+          ./build/install-build-deps.sh --android
+
+      - name: Configure GN Args
+        if: ${{ github.event.inputs.fetch_sources == 'true' }}
+        run: |
+          cd src
+          mkdir -p out/Default
+          > out/Default/args.gn
+          echo 'target_os = "android"' >> out/Default/args.gn
+          echo 'target_cpu = "arm64"' >> out/Default/args.gn
+          echo 'is_debug = false' >> out/Default/args.gn
+          echo 'is_official_build = true' >> out/Default/args.gn
+          echo 'symbol_level = 0' >> out/Default/args.gn
+          echo 'blink_symbol_level = 0' >> out/Default/args.gn
+          echo '' >> out/Default/args.gn
+          echo '# Desktop Android Layout + H.264 Codecs' >> out/Default/args.gn
+          echo 'is_desktop_android = true' >> out/Default/args.gn
+          echo 'proprietary_codecs = true' >> out/Default/args.gn
+          echo 'ffmpeg_branding = "Chrome"' >> out/Default/args.gn
+          echo '' >> out/Default/args.gn
+          echo '# Optimization & Size Reduction' >> out/Default/args.gn
+          echo 'use_lto = true' >> out/Default/args.gn
+          echo 'enable_lto_on_non_official_builds = true' >> out/Default/args.gn
+          echo 'v8_use_snapshot = false' >> out/Default/args.gn
+          echo 'v8_enable_builtins_optimization = false' >> out/Default/args.gn
+          echo '' >> out/Default/args.gn
+          echo '# Disable unnecessary features' >> out/Default/args.gn
+          echo 'enable_nacl = false' >> out/Default/args.gn
+          echo 'enable_wayland_server = false' >> out/Default/args.gn
+          echo 'use_vaapi = false' >> out/Default/args.gn
+          echo 'use_cups = false' >> out/Default/args.gn
+          echo 'enable_remoting = false' >> out/Default/args.gn
+          echo 'enable_reporting = false' >> out/Default/args.gn
+          echo 'enable_extensions = false' >> out/Default/args.gn
+          echo 'v8_enable_gdbjit = false' >> out/Default/args.gn
+          echo 'enable_mse_mpeg2ts_stream_parser = false' >> out/Default/args.gn
+          echo 'is_component_build = false' >> out/Default/args.gn
+          echo '' >> out/Default/args.gn
+          echo '# Strip binaries' >> out/Default/args.gn
+          echo 'strip_absolute_paths_from_debug_symbols = true' >> out/Default/args.gn
+          gn gen out/Default || true
+
+      - name: Cache build artifacts
+        id: cache-build
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/src/out/Default
+          key: chromium-build-${{ runner.os }}-${{ github.run_number }}
+          restore-keys: |
+            chromium-build-${{ runner.os }}-
+
+      - name: Compile APK (optional)
+        if: ${{ github.event.inputs.compile == 'true' && github.event.inputs.fetch_sources == 'true' }}
+        run: |
+          cd src
+          autoninja -C out/Default -j $(nproc) chrome_public_apk
+
+      - name: Strip & Compress APK
+        if: ${{ github.event.inputs.compile == 'true' && github.event.inputs.fetch_sources == 'true' && success() }}
+        run: |
+          cd src/out/Default/apks
+          # Get original size
+          ORIG_SIZE=$(du -h ChromePublic.apk | cut -f1)
+          echo "Original APK: $ORIG_SIZE"
+          
+          # Try upx compression if available
+          if command -v upx &> /dev/null; then
+            upx --best --lzma ChromePublic.apk -o ChromePublic-upx.apk 2>/dev/null || true
+            if [ -f ChromePublic-upx.apk ]; then
+              COMPRESSED_SIZE=$(du -h ChromePublic-upx.apk | cut -f1)
+              echo "Compressed APK: $COMPRESSED_SIZE"
+              mv ChromePublic-upx.apk ChromePublic.apk
+            fi
+          fi
+
+      - name: Upload APK (only when compiled)
+        if: ${{ github.event.inputs.compile == 'true' && github.event.inputs.fetch_sources == 'true' && success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChromePublic-AndroidDesktop-H264
+          path: src/out/Default/apks/ChromePublic.apk
+          compression-level: 9
+
+      - name: Skipped compile notice
+        if: ${{ github.event.inputs.compile != 'true' }}
+        run: |
+          echo "compile input is not true — build/compile steps were skipped to avoid long runtimes. To run a full compile, re-run workflow and set compile=true."
